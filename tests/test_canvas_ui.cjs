@@ -58,7 +58,7 @@ function change(input, value) {
   input.dispatch(input.tagName === "select" ? "change" : "input");
 }
 
-function editor(initial = {}, { realStage = false } = {}) {
+function editor(initial = {}, { realStage = false, beforeAttach } = {}) {
   const head = new Element("head");
   const observers = [];
   const context = vm.createContext({
@@ -86,6 +86,7 @@ function editor(initial = {}, { realStage = false } = {}) {
     widgets: Object.entries(values).map(([name, value]) => ({ name, value })),
     size: [600, 800], addDOMWidget() {}, setDirtyCanvas() {},
   };
+  beforeAttach?.(node);
   context.attachPanel(node);
   const panels = () => elements(node.__k2crRoot, (element) => element.className === "k2cr-canvas-lora");
   const button = (text, root = node.__k2crRoot) => elements(
@@ -358,4 +359,78 @@ test("size watcher preserves existing lifecycle hooks and avoids zoom-dependent 
   assert.equal(node.onRemoved("cleanup"), "removed");
   assert.equal(calls.at(-1)[0], node);
   assert.equal(calls.at(-1)[1], "cleanup");
+});
+
+test("a connected scene_prompt_text input makes the Scene prompt field read-only", () => {
+  const { node } = editor();
+  const sceneBox = elements(node.__k2crRoot, (element) => element.className === "k2cr-scene")[0];
+  const [summary, textarea] = sceneBox.children;
+  assert.equal(textarea.disabled, false);
+  node.inputs = [{ name: "scene_prompt_text", link: 7 }];
+  node.__k2crRender();
+  assert.equal(textarea.disabled, true);
+  assert.match(summary.textContent, /scene_prompt_text/);
+  node.inputs[0].link = null;
+  node.__k2crRender();
+  assert.equal(textarea.disabled, false);
+  assert.equal(summary.textContent, "Scene prompt");
+});
+
+test("connecting or disconnecting scene_prompt_text refreshes the panel and keeps prior hooks", () => {
+  const calls = [];
+  const { node } = editor({}, { beforeAttach: (target) => {
+    target.onConnectionsChange = () => calls.push("previous");
+  } });
+  const textarea = elements(node.__k2crRoot, (element) => element.className === "k2cr-scene")[0].children[1];
+  node.inputs = [{ name: "scene_prompt_text", link: 3 }];
+  node.onConnectionsChange(1, 0, true);
+  assert.equal(textarea.disabled, true);
+  node.inputs[0].link = null;
+  node.onConnectionsChange(1, 0, false);
+  assert.equal(textarea.disabled, false);
+  assert.deepEqual(calls, ["previous", "previous"]);
+});
+
+test("a saved workflow that loads with scene_prompt_text connected opens read-only", async () => {
+  const extensions = [];
+  const context = vm.createContext({
+    console, queueMicrotask,
+    app: { registerExtension: (extension) => extensions.push(extension) },
+    api: { fetchApi: async () => ({ json: async () => ({ LoraLoader: { input: { required: { lora_name: [["None"]] } } } }) }) },
+    document: { head: new Element("head"), createElement: (tag) => new Element(tag), getElementById: () => undefined },
+    window: { requestAnimationFrame: (callback) => callback() },
+    ResizeObserver: class { observe() {} disconnect() {} },
+  });
+  const source = readFileSync(join(process.cwd(), "web", "character_router.js"), "utf8");
+  vm.runInContext(source.replace(/^import .*;\r?\n/gm, ""), context);
+  context.drawStage = () => {};
+  function NodeType() {}
+  await extensions[0].beforeRegisterNodeDef(NodeType, { name: "Krea2CharacterRouter" });
+  const node = Object.assign(new NodeType(), {
+    widgets: [{ name: "regions_json", value: "[]" }, { name: "canvas_lora_json", value: "{}" },
+      { name: "scene_prompt", value: "A city" }, { name: "width", value: 1024 }, { name: "height", value: 1024 },
+      { name: "supersample_scale", value: 1 }],
+    size: [600, 800], addDOMWidget() {}, setDirtyCanvas() {},
+  });
+  node.onNodeCreated();
+  node.inputs = [{ name: "scene_prompt_text", link: 9 }];  // links restored by configure()
+  node.onConfigure({});
+  await new Promise((resolve) => setImmediate(resolve));
+  const textarea = elements(node.__k2crRoot, (element) => element.className === "k2cr-scene")[0].children[1];
+  assert.equal(textarea.disabled, true);
+  node.inputs[0].link = null;  // later disconnected by the user
+  node.onConnectionsChange(1, 0, false);
+  assert.equal(textarea.disabled, false);
+});
+
+test("connection changes on other sockets do not rebuild the character rows", () => {
+  const { node } = editor();
+  const rows = elements(node.__k2crRoot, (element) => element.className === "k2cr-rows")[0];
+  const before = rows.children[0];
+  node.inputs = [{ name: "model", link: 1 }, { name: "scene_prompt_text", link: null }];
+  node.onConnectionsChange(1, 0, true);
+  assert.equal(rows.children[0], before);
+  node.inputs[1].link = 4;
+  node.onConnectionsChange(1, 1, true);
+  assert.notEqual(rows.children[0], before);
 });

@@ -41,7 +41,7 @@ def composer(monkeypatch):
     model = SimpleNamespace(clone=lambda: object())
     clip = SimpleNamespace(tokenize=lambda prompt: prompt, encode_from_tokens_scheduled=lambda tokens: [])
 
-    def apply(canvases, characters=None):
+    def apply(canvases, characters=None, **extra_inputs):
         return node_module.Krea2CharacterRouter().apply(
             model=model, clip=clip, scene_prompt="A city", width=256, height=256,
             regions_json=json.dumps(
@@ -51,6 +51,7 @@ def composer(monkeypatch):
             feather=0.0, overlap_policy="nearest", schedule_softness=0.0,
             strict=True, debug=False, supersample_scale=1.0,
             canvas_lora_json=json.dumps(canvases),
+            **extra_inputs,
         )
 
     return apply, sessions, node_module
@@ -102,3 +103,34 @@ def test_composer_supports_multiple_canvas_loras_without_active_characters(compo
     assert sessions[0].mask_modes == ["global", "unboxed"]
     assert sessions[0].token_positions == [[], []]
     assert output[2] == "A city."
+
+
+def test_connected_scene_prompt_text_replaces_the_scene_prompt_field(composer):
+    apply, _, _ = composer
+    output = apply([], scene_prompt_text="A beach at sunset")
+    assert output[2].startswith("A beach at sunset")
+    assert "A city" not in output[2]
+    assert json.loads(output[6])["scene_prompt"] == "A beach at sunset"
+
+
+def test_blank_scene_prompt_text_falls_back_to_the_field_with_a_warning(composer):
+    apply, _, _ = composer
+    output = apply([], scene_prompt_text="   ")
+    assert output[2].startswith("A city")
+    assert any("scene_prompt_text" in warning for warning in json.loads(output[4])["warnings"])
+
+
+def test_scene_prompt_text_is_an_optional_socket_that_keeps_widget_order(composer):
+    _, _, node_module = composer
+    inputs = node_module.Krea2CharacterRouter.INPUT_TYPES()
+    assert list(inputs["required"])[-1] == "canvas_lora_json"
+    assert inputs["optional"]["scene_prompt_text"] == ("STRING", {"forceInput": True, "tooltip": (
+        "Optional. When connected and not empty, replaces the Scene prompt field "
+        "(e.g. from a prompt enhancer or Prompt Manager)."
+    )})
+
+
+def test_connected_scene_prompt_text_keeps_its_line_breaks_in_the_share_json(composer):
+    apply, _, _ = composer
+    output = apply([], scene_prompt_text="  A beach at sunset.\n\nWarm rim light.  ")
+    assert json.loads(output[6])["scene_prompt"] == "A beach at sunset.\n\nWarm rim light."

@@ -4,6 +4,24 @@ import { api } from "../../scripts/api.js";
 const NODE_TYPE = "Krea2CharacterRouter";
 const JSON_WIDGET = "regions_json";
 const CANVAS_LORA_WIDGET = "canvas_lora_json";
+const SCENE_TEXT_INPUT = "scene_prompt_text";
+
+function sceneTextConnected(node) {
+  const input = node.inputs?.find((item) => item.name === SCENE_TEXT_INPUT);
+  return input?.link != null;
+}
+
+// Re-render only when the scene_prompt_text link no longer matches what the panel shows, not on every
+// model/clip/output change. Compared with the panel, not a cached flag: configure() restores saved links
+// without firing onConnectionsChange.
+function refreshOnConnectionChange(node, render, shownConnected) {
+  const original = node.onConnectionsChange;
+  node.onConnectionsChange = function () {
+    const result = original?.apply(this, arguments);
+    if (sceneTextConnected(node) !== shownConnected()) render();
+    return result;
+  };
+}
 const COLORS = ["#f04452", "#338cff", "#35d873", "#f1b42f", "#995de9", "#2cced0", "#ef61b4", "#b2cb3f"];
 let loraNames = ["None"];
 
@@ -770,6 +788,10 @@ function attachPanel(node) {
     if (document.activeElement !== scenePrompt && scenePrompt.value !== currentScenePrompt) {
       scenePrompt.value = currentScenePrompt;
     }
+    // A connected scene_prompt_text replaces this field when the workflow runs, so it is shown read-only.
+    const sceneFromInput = sceneTextConnected(node);
+    scenePrompt.disabled = sceneFromInput;
+    sceneSummary.textContent = sceneFromInput ? `Scene prompt (from connected ${SCENE_TEXT_INPUT} input)` : "Scene prompt";
     const regions = readRegions(node).map(clampRegion);
     countInput.value = String(Math.max(1, regions.length));
     add.disabled = regions.length >= 5;
@@ -932,6 +954,7 @@ function attachPanel(node) {
   node.__k2crRoot = root;
   node.__k2crRender = renderRows;
   node.__k2crRenderCanvas = renderCanvasLoras;
+  refreshOnConnectionChange(node, renderRows, () => scenePrompt.disabled);
   const refreshStage = watchStageSize(node, canvas, () => drawStage(node, canvas, selected));
   hookDimensionWidget(node, "width", refreshStage);
   hookDimensionWidget(node, "height", refreshStage);

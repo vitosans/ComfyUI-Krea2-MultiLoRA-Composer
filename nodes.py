@@ -16,6 +16,7 @@ from .krea2_router.config import (
     concept_text_for_region,
     parse_canvas_loras,
     parse_regions,
+    resolve_scene_prompt,
 )
 from .krea2_router.masks import (
     build_region_masks,
@@ -145,7 +146,20 @@ class Krea2CharacterRouter:
                     "STRING",
                     {"multiline": True, "default": DEFAULT_CANVAS_LORA_JSON},
                 ),
-            }
+            },
+            # A socket, not a widget, so existing workflows keep their widget positions.
+            "optional": {
+                "scene_prompt_text": (
+                    "STRING",
+                    {
+                        "forceInput": True,
+                        "tooltip": (
+                            "Optional. When connected and not empty, replaces the Scene prompt field "
+                            "(e.g. from a prompt enhancer or Prompt Manager)."
+                        ),
+                    },
+                ),
+            },
         }
 
     RETURN_TYPES = (
@@ -194,10 +208,14 @@ class Krea2CharacterRouter:
         debug,
         supersample_scale,
         canvas_lora_json=DEFAULT_CANVAS_LORA_JSON,
+        scene_prompt_text=None,
     ):
         regions, warnings = parse_regions(regions_json)
         canvas_loras, canvas_warnings = parse_canvas_loras(canvas_lora_json)
         warnings.extend(canvas_warnings)
+        scene_prompt, scene_warning = resolve_scene_prompt(scene_prompt, scene_prompt_text)
+        if scene_warning:
+            warnings.append(scene_warning)
         enabled = [region for region in regions if region.enabled]
         active_characters = [
             region for region in enabled if region.lora not in {"", "None"} and region.strength != 0.0

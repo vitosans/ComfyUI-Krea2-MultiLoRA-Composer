@@ -323,6 +323,22 @@ def concept_text_for_canvas(canvas_lora: CanvasLora) -> str:
     return concept
 
 
+def resolve_scene_prompt(scene_prompt: str, scene_prompt_text: str | None) -> tuple[str, str | None]:
+    """The scene prompt to use and an optional warning.
+
+    A connected ``scene_prompt_text`` (e.g. a prompt enhancer's output) replaces the Scene prompt field. ``None`` means
+    the socket is not connected. A connected but blank text falls back to the field, with a warning, so an enhancer
+    that returns nothing does not silently drop the scene.
+    """
+    if scene_prompt_text is None:
+        return scene_prompt, None
+    # Trimmed only: line breaks survive into the share JSON; compose_prompt flattens whitespace for the model.
+    text = str(scene_prompt_text).strip()
+    if text:
+        return text, None
+    return scene_prompt, "scene_prompt_text is connected but empty; using the Scene prompt field instead."
+
+
 def compose_prompt(
     scene_prompt: str,
     regions: list[Region],
