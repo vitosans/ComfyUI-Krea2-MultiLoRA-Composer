@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 DEFAULT_REGIONS_JSON = json.dumps(
@@ -178,8 +178,14 @@ def _region_from_item(item: dict[str, Any], index: int) -> Region:
     )
 
 
-def parse_regions(regions_json: str) -> tuple[list[Region], list[str]]:
-    """Parse the stable JSON schema and return regions plus actionable warnings."""
+def parse_regions(
+    regions_json: str, lora_inputs: dict[int, dict | None] | None = None,
+) -> tuple[list[Region], list[str]]:
+    """Parse the stable JSON schema and return regions plus actionable warnings.
+
+    ``lora_inputs`` (connected ``lora_N`` selections, see :func:`apply_lora_inputs`) are applied before the checks,
+    so the warnings describe the LoRAs that will actually run.
+    """
     try:
         raw = json.loads(regions_json or "[]")
     except (TypeError, ValueError) as exc:
@@ -190,7 +196,7 @@ def parse_regions(regions_json: str) -> tuple[list[Region], list[str]]:
         raise ValueError("regions_json must be a JSON array")
 
     regions = [_region_from_item(item, index) for index, item in enumerate(raw) if isinstance(item, dict)]
-    warnings: list[str] = []
+    regions, warnings = apply_lora_inputs(regions, lora_inputs or {})
     seen_names: set[str] = set()
     seen_triggers: set[str] = set()
     for region in regions:
@@ -321,6 +327,33 @@ def concept_text_for_canvas(canvas_lora: CanvasLora) -> str:
     if canvas_lora.trigger and canvas_lora.trigger.casefold() not in concept.casefold():
         concept = f"{canvas_lora.trigger}, {concept}" if concept else canvas_lora.trigger
     return concept
+
+
+MAX_LORA_INPUTS = 5  # one optional lora_N socket per character row (the editor allows up to five)
+
+
+def apply_lora_inputs(regions: list[Region], lora_inputs: dict[int, dict | None]) -> tuple[list[Region], list[str]]:
+    """Rows with their LoRA and strength replaced by connected ``lora_N`` inputs (N is 1-based).
+
+    Each input is a Krea2 Composer LoRA selection, ``{"lora": name, "strength": value}``; ``None`` means the socket is
+    not connected and the row keeps its own picker. An input with no matching row is reported, not applied.
+    """
+    updated = list(regions)
+    warnings = []
+    for number, selection in sorted(lora_inputs.items()):
+        if selection is None:
+            continue
+        if number > len(updated):
+            warnings.append(f"lora_{number} is connected but there is no character row {number}; it was ignored.")
+            continue
+        if not updated[number - 1].enabled:
+            warnings.append(f"lora_{number} is connected but character row {number} is disabled; it has no effect.")
+        updated[number - 1] = replace(
+            updated[number - 1],
+            lora=_clean_text(selection.get("lora")) or "None",
+            strength=_finite_float(selection.get("strength", 1.0), 1.0),
+        )
+    return updated, warnings
 
 
 def resolve_scene_prompt(scene_prompt: str, scene_prompt_text: str | None) -> tuple[str, str | None]:

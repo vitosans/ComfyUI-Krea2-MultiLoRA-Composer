@@ -6,19 +6,35 @@ const JSON_WIDGET = "regions_json";
 const CANVAS_LORA_WIDGET = "canvas_lora_json";
 const SCENE_TEXT_INPUT = "scene_prompt_text";
 
-function sceneTextConnected(node) {
-  const input = node.inputs?.find((item) => item.name === SCENE_TEXT_INPUT);
+const MAX_LORA_INPUTS = 5;
+
+function inputConnected(node, name) {
+  const input = node.inputs?.find((item) => item.name === name);
   return input?.link != null;
 }
 
-// Re-render only when the scene_prompt_text link no longer matches what the panel shows, not on every
-// model/clip/output change. Compared with the panel, not a cached flag: configure() restores saved links
-// without firing onConnectionsChange.
-function refreshOnConnectionChange(node, render, shownConnected) {
+function sceneTextConnected(node) {
+  return inputConnected(node, SCENE_TEXT_INPUT);
+}
+
+function loraInputConnected(node, number) {
+  return inputConnected(node, `lora_${number}`);
+}
+
+// Which panel-relevant sockets are linked: scene_prompt_text and lora_1..lora_5.
+function connectionSignature(node) {
+  const loras = Array.from({ length: MAX_LORA_INPUTS }, (_, index) => loraInputConnected(node, index + 1));
+  return [sceneTextConnected(node), ...loras].map(Number).join("");
+}
+
+// Re-render only when those links no longer match what the panel shows, not on every model/clip/output change.
+// Compared with what was last rendered, not a flag cached here: configure() restores saved links without firing
+// onConnectionsChange, and its own re-render updates the shown signature.
+function refreshOnConnectionChange(node, render, shownSignature) {
   const original = node.onConnectionsChange;
   node.onConnectionsChange = function () {
     const result = original?.apply(this, arguments);
-    if (sceneTextConnected(node) !== shownConnected()) render();
+    if (connectionSignature(node) !== shownSignature()) render();
     return result;
   };
 }
@@ -597,6 +613,7 @@ function attachPanel(node) {
   const rows = document.createElement("div"); rows.className = "k2cr-rows";
   root.append(scene, toolbar, canvasLoraPanels, fileInput, canvas, rows);
   let selected = -1;
+  let renderedSignature = "";
 
   const resizeNodeToContent = (useCompactHeight) => {
     window.requestAnimationFrame(() => {
@@ -788,6 +805,7 @@ function attachPanel(node) {
     if (document.activeElement !== scenePrompt && scenePrompt.value !== currentScenePrompt) {
       scenePrompt.value = currentScenePrompt;
     }
+    renderedSignature = connectionSignature(node);
     // A connected scene_prompt_text replaces this field when the workflow runs, so it is shown read-only.
     const sceneFromInput = sceneTextConnected(node);
     scenePrompt.disabled = sceneFromInput;
@@ -808,13 +826,19 @@ function attachPanel(node) {
       head.append(enabled, name, remove);
 
       const grid = document.createElement("div"); grid.className = "k2cr-grid";
-      const loraPicker = makeSearchableLoraPicker(region.lora, (selected) => {
-        region.lora = selected;
-        persist(regions);
-      });
+      // A connected lora_N input replaces this row's LoRA and strength when the workflow runs: show them read-only.
+      const fromInput = loraInputConnected(node, index + 1);
+      const loraPicker = fromInput
+        ? makeInput("text", `from lora_${index + 1} input`, () => {})
+        : makeSearchableLoraPicker(region.lora, (selected) => {
+          region.lora = selected;
+          persist(regions);
+        });
+      if (fromInput) loraPicker.disabled = true;
       const trigger = makeInput("text", region.trigger || "", (input) => { region.trigger = input.value; persist(regions); });
       const strength = makeInput("number", region.strength ?? 1, (input) => { region.strength = number(input.value, 1); persist(regions); });
       strength.step = "0.05"; strength.min = "-4"; strength.max = "4";
+      if (fromInput) strength.disabled = true;
       const prompt = document.createElement("textarea");
       prompt.className = "k2cr-description";
       prompt.value = region.prompt || "";
@@ -954,7 +978,7 @@ function attachPanel(node) {
   node.__k2crRoot = root;
   node.__k2crRender = renderRows;
   node.__k2crRenderCanvas = renderCanvasLoras;
-  refreshOnConnectionChange(node, renderRows, () => scenePrompt.disabled);
+  refreshOnConnectionChange(node, renderRows, () => renderedSignature);
   const refreshStage = watchStageSize(node, canvas, () => drawStage(node, canvas, selected));
   hookDimensionWidget(node, "width", refreshStage);
   hookDimensionWidget(node, "height", refreshStage);

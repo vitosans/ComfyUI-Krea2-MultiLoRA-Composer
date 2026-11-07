@@ -134,3 +134,58 @@ def test_connected_scene_prompt_text_keeps_its_line_breaks_in_the_share_json(com
     apply, _, _ = composer
     output = apply([], scene_prompt_text="  A beach at sunset.\n\nWarm rim light.  ")
     assert json.loads(output[6])["scene_prompt"] == "A beach at sunset.\n\nWarm rim light."
+
+
+TWO_ROWS = [
+    {"name": "A", "lora": "row-a", "trigger": "AAA", "x": 0, "w": 0.5},
+    {"name": "B", "lora": "row-b", "trigger": "BBB", "x": 0.5, "w": 0.5, "strength": 0.7},
+]
+
+
+def test_connected_lora_inputs_replace_each_rows_lora_and_strength(composer):
+    apply, sessions, _ = composer
+    output = apply([], characters=TWO_ROWS, lora_2={"lora": "picked/b.safetensors", "strength": 1.2})
+    assert [(r.lora, r.strength) for r in sessions[0].regions] == [("row-a", 1.0), ("picked/b.safetensors", 1.2)]
+    shared = json.loads(output[6])["characters"]
+    assert [(c["lora"], c["strength"]) for c in shared] == [("row-a", 1.0), ("picked/b.safetensors", 1.2)]
+
+
+def test_a_lora_input_without_a_matching_row_is_reported(composer):
+    apply, sessions, _ = composer
+    output = apply([], lora_3={"lora": "extra", "strength": 1.0})
+    assert [r.lora for r in sessions[0].regions] == ["person"]
+    assert any("lora_3" in warning for warning in json.loads(output[4])["warnings"])
+
+
+def test_lora_inputs_are_optional_sockets_after_scene_prompt_text(composer):
+    _, _, node_module = composer
+    optional = node_module.Krea2CharacterRouter.INPUT_TYPES()["optional"]
+    assert list(optional) == ["scene_prompt_text", "lora_1", "lora_2", "lora_3", "lora_4", "lora_5"]
+    assert all(optional[f"lora_{i}"][0] == "KREA2_COMPOSER_LORA" for i in range(1, 6))
+
+
+def test_composer_lora_node_lists_loras_and_outputs_the_selection(composer, monkeypatch):
+    _, _, node_module = composer
+    folder_paths = ModuleType("folder_paths")
+    folder_paths.get_filename_list = lambda kind: ["Krea/a.safetensors", "Krea/b.safetensors"] if kind == "loras" else []
+    monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
+    node = node_module.Krea2ComposerLoRA
+    required = node.INPUT_TYPES()["required"]
+    assert required["lora_name"][0] == ["None", "Krea/a.safetensors", "Krea/b.safetensors"]
+    assert required["strength"][1]["default"] == 1.0
+    assert node().select("Krea/b.safetensors", 0.8) == ({"lora": "Krea/b.safetensors", "strength": 0.8},)
+
+
+def test_row_warnings_describe_the_connected_lora_not_the_rows_own(composer):
+    apply, _, _ = composer
+    rows = [{"name": "A", "lora": "None", "trigger": "AAA", "x": 0, "w": 0.5}]
+    warnings = json.loads(apply([], characters=rows, lora_1={"lora": "real", "strength": 3.0})[4])["warnings"]
+    assert not any("no LoRA selected" in warning for warning in warnings)
+    assert any("high LoRA strength (3.00)" in warning for warning in warnings)
+
+
+def test_a_lora_input_for_a_disabled_row_is_reported(composer):
+    apply, _, _ = composer
+    rows = [*TWO_ROWS[:1], {**TWO_ROWS[1], "enabled": False}]
+    warnings = json.loads(apply([], characters=rows, lora_2={"lora": "x", "strength": 1.0})[4])["warnings"]
+    assert any("lora_2" in warning and "disabled" in warning for warning in warnings)

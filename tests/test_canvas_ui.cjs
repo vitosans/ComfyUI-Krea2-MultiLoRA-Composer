@@ -434,3 +434,32 @@ test("connection changes on other sockets do not rebuild the character rows", ()
   node.onConnectionsChange(1, 1, true);
   assert.notEqual(rows.children[0], before);
 });
+
+test("a row whose lora_N input is connected shows its LoRA and strength as read-only", () => {
+  const { node } = editor();
+  node.widgets[0].value = JSON.stringify([
+    { name: "A", enabled: true, lora: "row-a", trigger: "AAA" },
+    { name: "B", enabled: true, lora: "row-b", trigger: "BBB" },
+  ]);
+  node.inputs = [{ name: "lora_2", link: 5 }];
+  node.__k2crRender();
+  const rows = elements(node.__k2crRoot, (element) => element.className === "k2cr-row");
+  const pickerOf = (row) => field(row, "Character LoRA");
+  const strengthOf = (row) => field(row, "Strength");
+  assert.equal(strengthOf(rows[0]).disabled, undefined);
+  assert.equal(strengthOf(rows[1]).disabled, true);
+  assert.equal(pickerOf(rows[1]).disabled, true);
+  assert.match(pickerOf(rows[1]).value, /lora_2 input/);
+  assert.notEqual(pickerOf(rows[0]).disabled, true);
+});
+
+test("connecting a lora_N input refreshes the rows", () => {
+  const { node } = editor();
+  node.inputs = [{ name: "lora_1", link: null }];
+  node.onConnectionsChange(1, 0, false);
+  const strength = () => field(elements(node.__k2crRoot, (element) => element.className === "k2cr-row")[0], "Strength");
+  assert.notEqual(strength().disabled, true);
+  node.inputs[0].link = 8;
+  node.onConnectionsChange(1, 0, true);
+  assert.equal(strength().disabled, true);
+});

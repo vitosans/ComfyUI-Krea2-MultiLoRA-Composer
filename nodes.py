@@ -10,6 +10,7 @@ from .krea2_router.adapters import load_region_adapters
 from .krea2_router.config import (
     DEFAULT_CANVAS_LORA_JSON,
     DEFAULT_REGIONS_JSON,
+    MAX_LORA_INPUTS,
     RouterConfig,
     compose_prompt,
     concept_text_for_canvas,
@@ -27,6 +28,10 @@ from .krea2_router.supersampling import build_supersample_plan, coerce_supersamp
 from .krea2_router.tokens import find_krea2_concept_positions
 
 LOGGER = logging.getLogger("krea2_multilora_composer")
+
+
+# Output of Krea2ComposerLoRA, input of the Composer's lora_N sockets: {"lora": name, "strength": value}.
+LORA_SELECTION = "KREA2_COMPOSER_LORA"
 
 
 def _run_common_ksampler(
@@ -159,6 +164,19 @@ class Krea2CharacterRouter:
                         ),
                     },
                 ),
+                # After scene_prompt_text, so saved links to it keep their slot.
+                **{
+                    f"lora_{number}": (
+                        LORA_SELECTION,
+                        {
+                            "tooltip": (
+                                f"Optional. A Krea2 Composer LoRA node; replaces character row {number}'s "
+                                "LoRA and strength."
+                            ),
+                        },
+                    )
+                    for number in range(1, MAX_LORA_INPUTS + 1)
+                },
             },
         }
 
@@ -209,8 +227,11 @@ class Krea2CharacterRouter:
         supersample_scale,
         canvas_lora_json=DEFAULT_CANVAS_LORA_JSON,
         scene_prompt_text=None,
+        **lora_inputs,
     ):
-        regions, warnings = parse_regions(regions_json)
+        regions, warnings = parse_regions(
+            regions_json, {number: lora_inputs.get(f"lora_{number}") for number in range(1, MAX_LORA_INPUTS + 1)},
+        )
         canvas_loras, canvas_warnings = parse_canvas_loras(canvas_lora_json)
         warnings.extend(canvas_warnings)
         scene_prompt, scene_warning = resolve_scene_prompt(scene_prompt, scene_prompt_text)
@@ -556,11 +577,41 @@ class Krea2SupersampledKSampler:
         )
 
 
+class Krea2ComposerLoRA:
+    """Picks one character LoRA for a Composer lora_N input, so LoRAs can be swapped on a visible node.
+
+    It only names the LoRA and its strength: the Composer loads it and routes it to that character's box. (A regular
+    Load LoRA node would patch the whole model, which is what causes identity blending.)
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        import folder_paths
+
+        return {
+            "required": {
+                "lora_name": (["None", *folder_paths.get_filename_list("loras")],),
+                "strength": ("FLOAT", {"default": 1.0, "min": -4.0, "max": 4.0, "step": 0.05}),
+            }
+        }
+
+    RETURN_TYPES = (LORA_SELECTION,)
+    RETURN_NAMES = ("lora",)
+    FUNCTION = "select"
+    CATEGORY = "Krea2/Multi-LoRA Composer"
+    DESCRIPTION = "A character LoRA for the Composer's lora_N input (N = the character row it replaces)."
+
+    def select(self, lora_name, strength):
+        return ({"lora": lora_name, "strength": float(strength)},)
+
+
 NODE_CLASS_MAPPINGS = {
     "Krea2CharacterRouter": Krea2CharacterRouter,
     "Krea2SupersampledKSampler": Krea2SupersampledKSampler,
+    "Krea2ComposerLoRA": Krea2ComposerLoRA,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Krea2CharacterRouter": "Krea2 Multi-LoRA Composer",
     "Krea2SupersampledKSampler": "Krea2 Multi-LoRA SuperSampler",
+    "Krea2ComposerLoRA": "Krea2 Composer LoRA",
 }

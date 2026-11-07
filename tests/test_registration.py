@@ -17,7 +17,10 @@ def test_router_and_supersampled_sampler_are_registered():
     assert module.NODE_CLASS_MAPPINGS.keys() == {
         "Krea2CharacterRouter",
         "Krea2SupersampledKSampler",
+        "Krea2ComposerLoRA",
     }
+    assert module.NODE_DISPLAY_NAME_MAPPINGS["Krea2ComposerLoRA"] == "Krea2 Composer LoRA"
+    assert module.NODE_CLASS_MAPPINGS["Krea2ComposerLoRA"].RETURN_TYPES == ("KREA2_COMPOSER_LORA",)
     assert module.NODE_CLASS_MAPPINGS["Krea2CharacterRouter"].RETURN_TYPES == (
         "MODEL",
         "CONDITIONING",

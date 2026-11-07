@@ -111,6 +111,17 @@ runs. If the connected text is empty, the field's text is used instead and a war
 Keep character triggers and descriptions in the character rows, not in the generated scene text: the Composer
 appends each character's phrase to the scene prompt itself, and routes the LoRA by those phrases.
 
+### Character LoRAs from nodes
+
+To swap character LoRAs from visible nodes instead of the panel, add one **Krea2 Composer LoRA** node per character
+(LoRA dropdown and strength) and connect it to the Composer's optional `lora_1` … `lora_5` input. `lora_N` replaces
+character row N's LoRA and strength; that row's picker and strength show as read-only. The row keeps its trigger,
+description and box, which still route the LoRA. A connected `lora_N` without a row N is ignored with a warning in
+`diagnostics`.
+
+Use the Krea2 Composer LoRA node rather than **Load LoRA**: Load LoRA patches the whole model, so the LoRA would apply
+everywhere and the identities would blend.
+
 The placement grid follows the effective **width** and **height** inputs, including connections from ComfyUI's
 **Resolution Selector** (also through reroutes) and numeric primitive nodes. Changing the selector's aspect ratio,
 megapixels, or rounding multiple updates the grid's proportions and resolution label without resetting character
@@ -249,8 +260,8 @@ Version `0.5.0` appends an optional hidden Canvas LoRA configuration widget. Old
 and older `krea2_character_router_share_v1` scene files import without modification.
 The same hidden widget now accepts a list of Canvas LoRAs as well as the original single-object value, without
 changing widget order or internal node identifiers.
-The optional `scene_prompt_text` input is a socket rather than a widget, so it also leaves widget order unchanged;
-workflows that do not connect it behave exactly as before.
+The optional `scene_prompt_text` and `lora_1` … `lora_5` inputs are sockets rather than widgets, so they also leave
+widget order unchanged; workflows that do not connect them behave exactly as before.
 
 ## Development
 
